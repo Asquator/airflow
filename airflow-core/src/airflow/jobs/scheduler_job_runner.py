@@ -1977,7 +1977,10 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
         from sqlalchemy import exists
 
-        # Execute the query
+        # Get all dag_ids (for example, from DagModel)
+        all_dags = {d.dag_id for d in session.query(DagModel.dag_id).all()}
+
+        # Query running or queued task counts per DAG
         query = (
             session.query(
                 TaskInstance.dag_id,
@@ -1990,11 +1993,13 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 )
             )
             .group_by(TaskInstance.dag_id)
-        )
+        ).all()
 
-        # Iterate over results and emit metrics
-        for dag_id, task_count in query:
-            Stats.gauge(f"dag.running_or_queued_tasks.{dag_id}", task_count)
+        task_counts = {dag_id: count for dag_id, count in query}
+
+        # Emit gauge for all DAGs, emitting zero if not present
+        for dag_id in all_dags:
+            Stats.gauge(f"dag.running_or_queued_tasks.{dag_id}", task_counts.get(dag_id, 0))
 
         with DebugTrace.start_span(span_name="emit_pool_metrics", component="SchedulerJobRunner") as span:
             pools = Pool.slots_stats(session=session)
