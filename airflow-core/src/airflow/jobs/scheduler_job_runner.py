@@ -1057,6 +1057,12 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     action=bundle_cleanup_mgr.remove_stale_bundle_versions,
                 )
 
+
+        STARTED_RUN = False
+        ITERS = 0
+        SUM_LOOP_TIME = 0.0
+
+
         for loop_count in itertools.count(start=1):
             with (
                 DebugTrace.start_span(span_name="scheduler_job_loop", component="SchedulerJobRunner") as span,
@@ -1072,6 +1078,25 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 with create_session() as session:
                     if self._is_tracing_enabled():
                         self._end_spans_of_externally_ended_ops(session)
+
+                    if STARTED_RUN and (session.query(TaskInstance)
+                        .filter((TaskInstance.state == State.QUEUED) |
+                                (TaskInstance.state == State.SCHEDULED) |
+                                (TaskInstance.state == State.RUNNING) |
+                                (TaskInstance.state == None)).first()) is None:
+
+                                print(f"Iterations: {ITERS}")
+                                print(f"Average duration: {SUM_LOOP_TIME/ITERS}")
+
+                                import sys
+                                sys.exit(0)
+
+                    if not STARTED_RUN:
+                        STARTED_RUN = (session.query(TaskInstance)
+                        .filter(TaskInstance.state == State.SCHEDULED).first()) is not None
+
+                    if STARTED_RUN:
+                        ITERS += 1
 
                     # This will schedule for as many executors as possible.
                     num_queued_tis = self._do_scheduling(session)
@@ -1117,6 +1142,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 next_event = timers.run(blocking=False)
                 self.log.debug("Next timed event is in %f", next_event)
 
+            SUM_LOOP_TIME += timer.duration
             self.log.debug("Ran scheduling loop in %.2f seconds", timer.duration)
             if span.is_recording():
                 span.add_event(
@@ -1172,6 +1198,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
 
         :return: Number of TIs enqueued in this iteration
         """
+
         # Put a check in place to make sure we don't commit unexpectedly
         with prohibit_commit(session) as guard:
             if settings.USE_JOB_SCHEDULE:
@@ -1947,6 +1974,27 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
     @provide_session
     def _emit_pool_metrics(self, session: Session = NEW_SESSION) -> None:
         from airflow.models.pool import Pool
+
+        from sqlalchemy import exists
+
+        # Execute the query
+        query = (
+            session.query(
+                TaskInstance.dag_id,
+                func.count(TaskInstance.task_id).label('task_count')
+            )
+            .filter(
+                or_(
+                    TaskInstance.state == State.QUEUED,
+                    TaskInstance.state == State.RUNNING
+                )
+            )
+            .group_by(TaskInstance.dag_id)
+        )
+
+        # Iterate over results and emit metrics
+        for dag_id, task_count in query:
+            Stats.gauge(f"dag.running_or_queued_tasks.{dag_id}", task_count)
 
         with DebugTrace.start_span(span_name="emit_pool_metrics", component="SchedulerJobRunner") as span:
             pools = Pool.slots_stats(session=session)
