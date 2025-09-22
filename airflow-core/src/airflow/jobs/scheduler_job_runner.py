@@ -323,7 +323,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 **params,
             )
 
-        timer.stop()
+            timer.stop()
         except OperationalError as e:
             timer.stop(send=False)
             raise e
