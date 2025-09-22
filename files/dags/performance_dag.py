@@ -12,7 +12,7 @@ def create_performance_dag(
     dag_args = {
         "dag_id": dag_id,
         "catchup": False,
-        "max_active_tasks": 5,
+        "max_active_tasks": 10,
         "max_active_runs": 1
     }
 
