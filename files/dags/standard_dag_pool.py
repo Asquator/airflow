@@ -1,13 +1,13 @@
-from dataclasses import dataclass
-from datetime import datetime
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from itertools import product
+
 
 N = 20
 
 def create_performance_dag(
     dag_id: str,
+    seq: int = 0,
+    
 ) -> DAG:
     dag_args = {
         "dag_id": dag_id,
@@ -21,7 +21,7 @@ def create_performance_dag(
     for i in range(1, 200):
         BashOperator(
             task_id=f'task_{i}',
-            pool=(f'limited_pool_{i%N}'),
+            pool=(f'limited_pool_{(i + seq)%N}'),
             bash_command=f'echo 0',
             pool_slots=1,
             dag=dag,
@@ -34,7 +34,7 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 for i in range(N):
     dag_id = f"pool_performance_dag_{i}"
-    globals()[dag_id] = create_performance_dag(dag_id)
+    globals()[dag_id] = create_performance_dag(dag_id, i)
 
 
 with DAG(
