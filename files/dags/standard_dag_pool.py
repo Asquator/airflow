@@ -21,7 +21,7 @@ def create_performance_dag(
     for i in range(1, 200):
         BashOperator(
             task_id=f'task_{i}',
-            pool=('limited_pool' if i % 2 == 0 else 'default_pool'),
+            pool=(f'limited_pool_{i%N}'),
             bash_command=f'echo 0',
             pool_slots=1,
             dag=dag,
