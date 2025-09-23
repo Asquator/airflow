@@ -19,14 +19,9 @@ def create_performance_dag(
     dag = DAG(**dag_args)
 
     for i in range(1, 200):
-        # Determine priority: every 10th task gets higher priority
-        # if i % 5 == 0:
-        #     priority = 100
-        # else:
-        #     priority = 1
-
         BashOperator(
-            task_id=f'task_{i}', # priority_weight=priority,
+            task_id=f'task_{i}',
+            pool=('limited_pool' if i % 2 == 0 else 'default_pool'),
             bash_command=f'echo 0',
             pool_slots=1,
             dag=dag,
@@ -38,12 +33,12 @@ def create_performance_dag(
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 for i in range(N):
-    dag_id = f"performance_dag_{i}"
+    dag_id = f"pool_performance_dag_{i}"
     globals()[dag_id] = create_performance_dag(dag_id)
 
 
 with DAG(
-    dag_id="trigger_performance_dags",
+    dag_id="trigger_pool_performance_dags",
     schedule=None,
     catchup=False,
     tags=["trigger"],
@@ -51,7 +46,7 @@ with DAG(
 
     for i in range(N):
         TriggerDagRunOperator(
-            task_id=f"trigger_performance_dag_{i}",
-            trigger_dag_id=f"performance_dag_{i}",
+            task_id=f"trigger_pool_performance_dag_{i}",
+            trigger_dag_id=f"pool_performance_dag_{i}",
             poke_interval=10,
         )
