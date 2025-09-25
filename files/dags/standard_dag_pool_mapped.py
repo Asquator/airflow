@@ -46,7 +46,7 @@ with DAG(
 
     for i in range(N):
         TriggerDagRunOperator(
-            task_id=f"trigger_pool_performance_dag_{i}",
-            trigger_dag_id=f"pool_performance_dag_{i}",
+            task_id=f"trigger_mapped_pool_performance_dag_{i}",
+            trigger_dag_id=f"mapped_pool_performance_dag_{i}",
             poke_interval=10,
         )
