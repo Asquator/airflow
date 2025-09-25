@@ -23,6 +23,7 @@ def create_performance_dag(dag_id: str, seq: int = 0) -> DAG:
             task_id=f'task_{i}',
             pool=(f'limited_pool_{(i + seq)%N}'),
             pool_slots=1,
+            max_active_tis_per_dagrun=5,
             dag=dag
         ).expand(bash_command=["echo 0" for _ in range(MAPPED_BATCH_SIZE)])
 
