@@ -2171,6 +2171,9 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     self.log.error("DagRun %s was deleted unexpectedly", dag_run.id)
                     return None
                 dag_run = dag_run_reloaded
+                last_unfinished_ti = (
+                    max(unfinished_task_instances, key=lambda ti: ti.end_date) if unfinished_task_instances else None
+                )
                 callback_to_execute = DagCallbackRequest(
                     filepath=dag_model.relative_fileloc or "",
                     dag_id=dag.dag_id,
@@ -2179,7 +2182,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     bundle_version=dag_run.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=dag_run,
-                        last_ti=None,
+                        last_ti=last_unfinished_ti,
                     ),
                     is_failure_callback=True,
                     msg="timed_out",

@@ -1249,6 +1249,9 @@ class DagRun(Base, LoggingMixin):
             if execute_callbacks and dag.has_on_success_callback:
                 self.handle_dag_callback(dag=cast("SDKDAG", dag), success=True, reason="success")
             elif dag.has_on_success_callback:
+                last_ti_to_make_effect: TI | None = (
+                    max(tis_for_dagrun_state, key=lambda ti: ti.end_date) if tis_for_dagrun_state else None
+                )
                 callback = DagCallbackRequest(
                     filepath=self.dag_model.relative_fileloc,
                     dag_id=self.dag_id,
@@ -1257,7 +1260,7 @@ class DagRun(Base, LoggingMixin):
                     bundle_version=self.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=self,
-                        last_ti=None,
+                        last_ti=last_ti_to_make_effect,
                     ),
                     is_failure_callback=False,
                     msg="success",
@@ -1288,6 +1291,9 @@ class DagRun(Base, LoggingMixin):
                     reason="all_tasks_deadlocked",
                 )
             elif dag.has_on_failure_callback:
+                last_finished_ti: TI | None = (
+                    max(info.finished_tis, key=lambda ti: ti.end_date) if info.finished_tis else None
+                )
                 callback = DagCallbackRequest(
                     filepath=self.dag_model.relative_fileloc,
                     dag_id=self.dag_id,
@@ -1296,7 +1302,7 @@ class DagRun(Base, LoggingMixin):
                     bundle_version=self.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=self,
-                        last_ti=None
+                        last_ti=last_finished_ti
                     ),
                     is_failure_callback=True,
                     msg="all_tasks_deadlocked",
