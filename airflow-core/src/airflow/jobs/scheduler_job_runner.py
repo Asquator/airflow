@@ -2179,7 +2179,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     bundle_version=dag_run.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=dag_run,
-                        last_ti=dag_run.get_last_ti(dag=dag, session=session),
+                        last_ti=None,
                     ),
                     is_failure_callback=True,
                     msg="timed_out",

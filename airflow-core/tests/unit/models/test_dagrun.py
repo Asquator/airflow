@@ -677,7 +677,7 @@ class TestDagRun:
             bundle_version=None,
             context_from_server=DagRunContext(
                 dag_run=dag_run,
-                last_ti=dag_run.get_last_ti(dag, session),
+                last_ti=dag_run.get_first_ti_causing_failure(dag, session),
             ),
             msg="success",
         )
@@ -726,7 +726,7 @@ class TestDagRun:
             bundle_version=None,
             context_from_server=DagRunContext(
                 dag_run=dag_run,
-                last_ti=dag_run.get_last_ti(dag, session),
+                last_ti=dag_run.get_first_ti_causing_failure(dag, session),
             ),
         )
 
@@ -2996,96 +2996,184 @@ def test_teardown_and_fail_fast(dag_maker):
     }
 
 
-class TestDagRunGetLastTi:
-    def test_get_last_ti_with_multiple_tis(self, dag_maker, session):
-        """Test get_last_ti returns the last TI (first created) when multiple TIs exist"""
-        with dag_maker("test_dag", session=session) as dag:
-            BashOperator(task_id="task1", bash_command="echo 1")
-            BashOperator(task_id="task2", bash_command="echo 2")
-            BashOperator(task_id="task3", bash_command="echo 3")
-
-        dr = dag_maker.create_dagrun()
-
-        tis = dr.get_task_instances(session=session)
-        assert len(tis) == 3
-
-        # Mark some TIs with different states
-        tis[0].state = TaskInstanceState.SUCCESS
-        tis[1].state = TaskInstanceState.FAILED
-        tis[2].state = TaskInstanceState.RUNNING
-        session.commit()
-
-        last_ti = dr.get_last_ti(dag, session=session)
-
-        # Should return the last TI in the list (index -1)
-        assert last_ti is not None
-        assert last_ti == tis[-1]
-        assert last_ti.task_id == "task3"
-
-    def test_get_last_ti_filters_none_state_in_partial_dag(self, dag_maker, session):
-        """Test get_last_ti filters out NONE state TIs when dag is partial"""
-        with dag_maker("test_dag", session=session) as dag:
-            BashOperator(task_id="task1", bash_command="echo 1")
-            BashOperator(task_id="task2", bash_command="echo 2")
-
-        dr = dag_maker.create_dagrun()
-
-        dag.partial = True
-
-        # Create task instances with different states
-        tis = dr.get_task_instances(session=session)
-        tis[0].state = State.NONE  # Should be filtered out in partial DAG
-        tis[1].state = TaskInstanceState.RUNNING
-        session.commit()
-
-        last_ti = dr.get_last_ti(dag, session=session)
-
-        assert last_ti is not None
-        assert last_ti.state != State.NONE
-        assert last_ti.task_id == "task2"
-
-    def test_get_last_ti_filters_removed_tasks(self, dag_maker, session):
-        """Test get_last_ti filters out REMOVED task instances"""
-        with dag_maker("test_dag", session=session) as dag:
-            BashOperator(task_id="task1", bash_command="echo 1")
-            BashOperator(task_id="task2", bash_command="echo 2")
-            BashOperator(task_id="task3", bash_command="echo 3")
-
-        dr = dag_maker.create_dagrun()
-
-        tis = dr.get_task_instances(session=session)
-        assert len(tis) == 3
-
-        ti_by_id = {ti.task_id: ti for ti in tis}
-
-        # Mark some TIs as removed
-        ti_by_id["task1"].state = TaskInstanceState.REMOVED
-        ti_by_id["task2"].state = TaskInstanceState.REMOVED
-        ti_by_id["task3"].state = TaskInstanceState.SUCCESS
-        session.commit()
-
-        last_ti = dr.get_last_ti(dag, session=session)
-
-        # Should return the TI that is not REMOVED
-        assert last_ti is not None
-        assert last_ti.state != TaskInstanceState.REMOVED
-        assert last_ti.task_id == "task3"
-
-    def test_get_last_ti_with_single_ti(self, dag_maker, session):
-        """Test get_last_ti works with single task instance"""
-        with dag_maker("test_dag", session=session) as dag:
-            BashOperator(task_id="single_task", bash_command="echo 1")
-
-        dr = dag_maker.create_dagrun()
-
-        tis = dr.get_task_instances(session=session)
-        assert len(tis) == 1
-
-        last_ti = dr.get_last_ti(dag, session=session)
-
-        assert last_ti is not None
-        assert last_ti == tis[0]
-        assert last_ti.task_id == "single_task"
+class TestDagRunGetFirstTiCausingFailure:  
+    """Test the get_first_ti_causing_failure method."""  
+      
+    @pytest.fixture(autouse=True)  
+    def setup_test_cases(self):  
+        self._clean_db()  
+        yield  
+        self._clean_db()  
+  
+    @staticmethod  
+    def _clean_db():  
+        db.clear_db_runs()  
+        db.clear_db_dags()  
+        db.clear_db_dag_bundles()  
+  
+    @pytest.mark.parametrize("dag_structure,failed_tasks,expected_first", [  
+        # Linear DAG: A -> B -> C, B fails first  
+        (  
+            {"task_a": ["task_b"], "task_b": ["task_c"], "task_c": []},  
+            {"task_b": 3, "task_c": 2},  # minutes ago failed
+            "task_b"  
+        ),  
+        # Multiple paths: A -> B -> D, A -> C -> D, B fails earliest  
+        (  
+            {"task_a": ["task_b", "task_c"], "task_b": ["task_d"], "task_c": ["task_d"], "task_d": []},  
+            {"task_b": 3, "task_c": 2, "task_d": 1},  
+            "task_b"  
+        ),  
+        # Complex branching: start -> [branch1, branch2, branch3] -> [leaf1, leaf2, leaf3]  
+        (  
+            {"start": ["branch1", "branch2", "branch3"],   
+             "branch1": ["leaf1"], "branch2": ["leaf2"], "branch3": ["leaf3"],  
+             "leaf1": [], "leaf2": [], "leaf3": []},  
+            {"branch2": 4, "leaf2": 1},  
+            "branch2"  
+        ),  
+    ])  
+    def test_failure_detection_various_structures(self, dag_maker, session, dag_structure, failed_tasks, expected_first):  
+        """Test failure detection across different DAG structures."""  
+        with dag_maker("test_dag", session=session) as dag:  
+            # Create tasks based on structure  
+            tasks = {}  
+            for task_id in dag_structure:  
+                tasks[task_id] = EmptyOperator(task_id=task_id)  
+              
+            # Set up dependencies  
+            for task_id, downstream_ids in dag_structure.items():  
+                for down_id in downstream_ids:  
+                    tasks[task_id].set_downstream(tasks[down_id])  
+  
+        dr = dag_maker.create_dagrun()  
+        base_time = timezone.utcnow()  
+          
+        # Set task states  
+        for task_id, task in tasks.items():  
+            ti = dr.get_task_instance(task_id, session=session)  
+            if task_id in failed_tasks:  
+                ti.state = TaskInstanceState.FAILED  
+                ti.end_date = base_time - datetime.timedelta(minutes=failed_tasks[task_id])  
+            else:  
+                ti.state = TaskInstanceState.SUCCESS  
+                ti.end_date = base_time - datetime.timedelta(minutes=5)  
+          
+        session.commit()  
+          
+        first_failed = dr.get_first_ti_causing_failure(dag, session=session)  
+          
+        assert first_failed is not None  
+        assert first_failed.task_id == expected_first  
+  
+    @pytest.mark.parametrize("scenario,expected_result", [  
+        # No failed leaf tasks (non-leaf fails)  
+        ({"task_a": "failed", "task_b": "success"}, None),  
+        # Successful DAG run  
+        ({"task_a": "success", "task_b": "success"}, None),  
+        # Only teardown tasks with on_failure_fail_dagrun=True  
+        ({"teardown1": "failed", "teardown2": "failed"}, "teardown1"),  
+    ])  
+    def test_edge_cases(self, dag_maker, session, scenario, expected_result):  
+        """Test edge cases and special scenarios."""  
+        with dag_maker("test_edge_case", session=session) as dag:  
+            if "teardown1" in scenario:  
+                @teardown(on_failure_fail_dagrun=True)  
+                def teardown1():  
+                    pass  
+                @teardown(on_failure_fail_dagrun=True)  
+                def teardown2():  
+                    pass  
+                teardown1().set_downstream(teardown2())  
+            else:  
+                task_a = EmptyOperator(task_id="task_a")  
+                task_b = EmptyOperator(task_id="task_b")  
+                task_a.set_downstream(task_b)  
+  
+        dr = dag_maker.create_dagrun()  
+        base_time = timezone.utcnow()  
+          
+        for task_id, state in scenario.items():  
+            ti = dr.get_task_instance(task_id, session=session)  
+            ti.state = TaskInstanceState.FAILED if state == "failed" else TaskInstanceState.SUCCESS  
+            ti.end_date = base_time  
+              
+        session.commit()  
+          
+        result = dr.get_first_ti_causing_failure(dag, session=session)  
+          
+        if expected_result is None:  
+            assert result is None  
+        else:  
+            assert result is not None  
+            assert result.task_id == expected_result  
+  
+    def test_partial_dag_filtering(self, dag_maker, session):  
+        """Test that partial DAGs filter out NONE and REMOVED states."""  
+        with dag_maker("test_partial", session=session) as dag:  
+            task_a = EmptyOperator(task_id="task_a")  
+            task_b = EmptyOperator(task_id="task_b")  
+            task_c = EmptyOperator(task_id="task_c")  
+            task_a.set_downstream(task_b)  
+            task_b.set_downstream(task_c)  
+  
+        dr = dag_maker.create_dagrun()  
+        dag.partial = True  
+          
+        base_time = timezone.utcnow()  
+          
+        # Set states: A fails, B is NONE (should be filtered), C fails  
+        ti_a = dr.get_task_instance("task_a", session=session)  
+        ti_b = dr.get_task_instance("task_b", session=session)  
+        ti_c = dr.get_task_instance("task_c", session=session)  
+          
+        ti_a.state = TaskInstanceState.FAILED  
+        ti_a.end_date = base_time - datetime.timedelta(minutes=2)  
+          
+        ti_b.state = State.NONE  # Should be filtered out  
+        ti_b.end_date = base_time - datetime.timedelta(minutes=1)  
+          
+        ti_c.state = TaskInstanceState.FAILED  
+        ti_c.end_date = base_time  
+          
+        session.commit()  
+          
+        first_failed = dr.get_first_ti_causing_failure(dag, session=session)  
+          
+        assert first_failed is not None  
+        assert first_failed.task_id == "task_a"  # Should ignore task_b  
+  
+    def test_teardown_tasks_handling(self, dag_maker, session):  
+        """Test teardown tasks are ignored unless on_failure_fail_dagrun=True."""  
+        with dag_maker("test_teardown", session=session) as dag:  
+            task_a = EmptyOperator(task_id="task_a")  
+              
+            @teardown  # Default: ignored  
+            def teardown_ignored():  
+                pass  
+              
+            @teardown(on_failure_fail_dagrun=True)  # Considered  
+            def teardown_considered():  
+                pass  
+              
+            task_a.set_downstream([teardown_ignored(), teardown_considered()])  
+  
+        dr = dag_maker.create_dagrun()  
+          
+        ti_a = dr.get_task_instance("task_a", session=session)  
+        ti_ignored = dr.get_task_instance("teardown_ignored", session=session)  
+        ti_considered = dr.get_task_instance("teardown_considered", session=session)  
+          
+        ti_a.state = TaskInstanceState.SUCCESS  
+        ti_ignored.state = TaskInstanceState.FAILED  # Should be ignored  
+        ti_considered.state = TaskInstanceState.FAILED  # Should be returned  
+          
+        session.commit()  
+          
+        first_failed = dr.get_first_ti_causing_failure(dag, session=session)  
+          
+        assert first_failed is not None  
+        assert first_failed.task_id == "teardown_considered"
 
 
 class TestDagRunHandleDagCallback:

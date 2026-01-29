@@ -3064,7 +3064,7 @@ class TestSchedulerJob:
             bundle_version=orm_dag.bundle_version,
             context_from_server=DagRunContext(
                 dag_run=dr,
-                last_ti=dr.get_last_ti(dag, session),
+                last_ti=dr.get_first_ti_causing_failure(dag, session),
             ),
             msg="timed_out",
         )
@@ -3260,7 +3260,7 @@ class TestSchedulerJob:
             bundle_version=None,
             context_from_server=DagRunContext(
                 dag_run=dr,
-                last_ti=dr.get_last_ti(dag, session),
+                last_ti=dr.get_first_ti_causing_failure(dag, session),
             ),
         )
 

@@ -1224,7 +1224,7 @@ class DagRun(Base, LoggingMixin):
                     bundle_version=self.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=self,
-                        last_ti=self.get_last_ti(dag=dag, session=session),
+                        last_ti=self.get_first_ti_causing_failure(dag=dag, session=session),
                     ),
                     is_failure_callback=True,
                     msg="task_failure",
@@ -1257,7 +1257,7 @@ class DagRun(Base, LoggingMixin):
                     bundle_version=self.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=self,
-                        last_ti=self.get_last_ti(dag=dag, session=session),
+                        last_ti=None,
                     ),
                     is_failure_callback=False,
                     msg="success",
@@ -1296,7 +1296,7 @@ class DagRun(Base, LoggingMixin):
                     bundle_version=self.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=self,
-                        last_ti=self.get_last_ti(dag=dag, session=session),
+                        last_ti=None
                     ),
                     is_failure_callback=True,
                     msg="all_tasks_deadlocked",
@@ -1411,24 +1411,44 @@ class DagRun(Base, LoggingMixin):
         # or LocalTaskJob, so we don't want to "falsely advertise" we notify about that
 
     @provide_session
-    def get_last_ti(self, dag: SerializedDAG, session: Session = NEW_SESSION) -> TI | None:
-        """Get Last TI from the dagrun to build and pass Execution context object from server to then run callbacks."""
+    def get_first_ti_causing_failure(self, dag: SerializedDAG, session: Session = NEW_SESSION) -> TI | None:  
+        """  
+        Get the first task instance that would cause a leaf task to fail the run.
+        """
+
         tis = self.get_task_instances(session=session)
-        # tis from a dagrun may not be a part of dag.partial_subset,
-        # since dag.partial_subset is a subset of the dag.
-        # This ensures that we will only use the accessible TI
-        # context for the callback.
+
+        failed_leaf_tis = [  
+            ti for ti in self._tis_for_dagrun_state(dag=dag, tis=tis)  
+            if ti.state in State.failed_states  
+        ]
+          
+        if not failed_leaf_tis:
+            return None  
+
         if dag.partial:
-            tis = [ti for ti in tis if not ti.state == State.NONE]
-        # filter out removed tasks
-        tis = natsorted(
-            (ti for ti in tis if ti.state != TaskInstanceState.REMOVED),
-            key=lambda ti: ti.task_id,
-        )
-        if not tis:
-            return None
-        ti = tis[-1]  # get last TaskInstance of DagRun
-        return ti
+            tis = [
+                ti for ti in tis if not ti.state in (
+                    State.NONE, TaskInstanceState.REMOVED
+                )
+            ]
+
+        # Collect all task IDs on failure paths
+        failure_path_task_ids = set()
+        for failed_leaf in failed_leaf_tis:
+            leaf_task = dag.get_task(failed_leaf.task_id)
+            upstream_ids = leaf_task.get_flat_relative_ids(upstream=True)
+            failure_path_task_ids.update(upstream_ids)
+            failure_path_task_ids.add(failed_leaf.task_id)
+
+        # Find failed tasks on possible failure paths
+        failed_on_paths = [  
+            ti for ti in tis
+            if ti.task_id in failure_path_task_ids and ti.state == State.FAILED  
+        ]
+          
+        return min(failed_on_paths, key=lambda ti: ti.end_date) if failed_on_paths else None
+
 
     def handle_dag_callback(self, dag: SDKDAG, success: bool = True, reason: str = "success"):
         """Only needed for `dag.test` where `execute_callbacks=True` is passed to `update_state`."""
@@ -1439,7 +1459,7 @@ class DagRun(Base, LoggingMixin):
         )
         from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
 
-        last_ti = self.get_last_ti(cast("SerializedDAG", dag))
+        last_ti = self.get_first_ti_causing_failure(cast("SerializedDAG", dag))
         if last_ti:
             last_ti_model = TIDataModel.model_validate(last_ti, from_attributes=True)
             task = dag.get_task(last_ti.task_id)
