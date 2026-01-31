@@ -1453,7 +1453,7 @@ class DagRun(Base, LoggingMixin):
             if ti.task_id in failure_path_task_ids and ti.state == State.FAILED  
         ]
           
-        return min(failed_on_paths, key=lambda ti: ti.end_date) if failed_on_paths else None
+        return min(failed_on_paths, key=lambda ti: ti.end_date, default=None)
 
 
     def handle_dag_callback(self, dag: SDKDAG, success: bool = True, reason: str = "success"):
