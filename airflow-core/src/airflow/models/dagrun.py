@@ -1292,7 +1292,7 @@ class DagRun(Base, LoggingMixin):
                 )
             elif dag.has_on_failure_callback:
                 last_finished_ti: TI | None = (
-                    max(info.finished_tis, key=lambda ti: ti.end_date) if info.finished_tis else None
+                    max(info.finished_tis, key=lambda ti: ti.end_date, default=None)
                 )
                 callback = DagCallbackRequest(
                     filepath=self.dag_model.relative_fileloc,
