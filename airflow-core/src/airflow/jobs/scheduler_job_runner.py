@@ -2144,7 +2144,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     .where(TI.dag_id == dag_run.dag_id)
                     .where(TI.run_id == dag_run.run_id)
                     .where(TI.state.in_(State.unfinished) | (TI.state.is_(None)))
-                )
+                ).all()
                 last_unfinished_ti = (
                     max(unfinished_task_instances, key=lambda ti: ti.end_date, default=None)
                 )
