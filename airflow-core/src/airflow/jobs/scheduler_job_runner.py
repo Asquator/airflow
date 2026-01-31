@@ -2143,7 +2143,10 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     select(TI)
                     .where(TI.dag_id == dag_run.dag_id)
                     .where(TI.run_id == dag_run.run_id)
-                    .where(TI.state.in_(State.unfinished))
+                    .where(TI.state.in_(State.unfinished) | (TI.state.is_(None)))
+                )
+                last_unfinished_ti = (
+                    max(unfinished_task_instances, key=lambda ti: ti.end_date, default=None)
                 )
                 for task_instance in unfinished_task_instances:
                     task_instance.state = TaskInstanceState.SKIPPED
@@ -2171,9 +2174,6 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     self.log.error("DagRun %s was deleted unexpectedly", dag_run.id)
                     return None
                 dag_run = dag_run_reloaded
-                last_unfinished_ti = (
-                    max(unfinished_task_instances, key=lambda ti: ti.end_date) if unfinished_task_instances else None
-                )
                 callback_to_execute = DagCallbackRequest(
                     filepath=dag_model.relative_fileloc or "",
                     dag_id=dag.dag_id,
