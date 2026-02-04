@@ -2285,7 +2285,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     .where(TI.state.in_(State.unfinished) | (TI.state.is_(None)))
                 ).all()
                 last_unfinished_ti = (
-                    max(unfinished_task_instances, key=lambda ti: ti.end_date, default=None)
+                    max(unfinished_task_instances, key=lambda ti: ti.start_date, default=None)
                 )
                 for task_instance in unfinished_task_instances:
                     task_instance.state = TaskInstanceState.SKIPPED
