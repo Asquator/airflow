@@ -1250,7 +1250,7 @@ class DagRun(Base, LoggingMixin):
                 self.handle_dag_callback(dag=cast("SDKDAG", dag), success=True, reason="success")
             elif dag.has_on_success_callback:
                 last_ti_to_make_effect: TI | None = (
-                    max(tis_for_dagrun_state, key=lambda ti: ti.end_date) if tis_for_dagrun_state else None
+                    max(tis_for_dagrun_state, key=lambda ti: ti.end_date, default=None)
                 )
                 callback = DagCallbackRequest(
                     filepath=self.dag_model.relative_fileloc,
