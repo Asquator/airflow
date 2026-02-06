@@ -681,7 +681,7 @@ class TestDagRun:
             bundle_version=None,
             context_from_server=DagRunContext(
                 dag_run=dag_run,
-                last_ti=dag_run.get_first_ti_causing_failure(dag, session),
+                last_ti=dag_run.get_task_instance(task_id="test_state_succeeded2"),
             ),
             msg="success",
         )

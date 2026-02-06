@@ -1248,7 +1248,7 @@ class DagRun(Base, LoggingMixin):
             if execute_callbacks and dag.has_on_success_callback:
                 self.handle_dag_callback(dag=cast("SDKDAG", dag), success=True, reason="success")
             elif dag.has_on_success_callback:
-                last_ti_to_make_effect: TI | None = (
+                last_ti_to_run: TI | None = (
                     max(tis_for_dagrun_state, key=lambda ti: ti.end_date, default=None)
                 )
                 callback = DagCallbackRequest(
@@ -1259,7 +1259,7 @@ class DagRun(Base, LoggingMixin):
                     bundle_version=self.bundle_version,
                     context_from_server=DagRunContext(
                         dag_run=self,
-                        last_ti=last_ti_to_make_effect,
+                        last_ti=last_ti_to_run,
                     ),
                     is_failure_callback=False,
                     msg="success",
