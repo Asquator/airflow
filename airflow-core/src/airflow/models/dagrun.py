@@ -1438,11 +1438,11 @@ class DagRun(Base, LoggingMixin):
 
         tis = self.get_task_instances(session=session)
 
-        failed_leaf_tis = [  
-            ti for ti in self._tis_for_dagrun_state(dag=dag, tis=tis)  
-            if ti.state in State.failed_states  
+        failed_leaf_tis = [
+            ti for ti in self._tis_for_dagrun_state(dag=dag, tis=tis)
+            if ti.state in State.failed_states
         ]
-          
+
         if not failed_leaf_tis:
             return None  
 
@@ -1462,9 +1462,9 @@ class DagRun(Base, LoggingMixin):
             failure_path_task_ids.add(failed_leaf.task_id)
 
         # Find failed tasks on possible failure paths
-        failed_on_paths = [  
+        failed_on_paths = [
             ti for ti in tis
-            if ti.task_id in failure_path_task_ids and ti.state == State.FAILED  
+            if ti.task_id in failure_path_task_ids and ti.state == State.FAILED
         ]
 
         return min(failed_on_paths, key=lambda ti: ti.start_date or datetime.max, default=None)
