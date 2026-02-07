@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from functools import reduce
 from typing import TYPE_CHECKING
 from unittest import mock
-from unittest.mock import call
+from unittest.mock import call, ANY
 
 import pendulum
 import pytest
@@ -435,7 +435,19 @@ class TestDagRun:
         dag_run = self.create_dag_run(dag=dag, task_states=initial_task_states, session=session)
         with mock.patch.object(dag_run, "handle_dag_callback") as handle_dag_callback:
             _, callback = dag_run.update_state()
-        assert handle_dag_callback.mock_calls == [mock.call(dag=dag, success=True, reason="success")]
+        assert handle_dag_callback.mock_calls == [
+            mock.call(
+                dag=dag,
+                success=True,
+                relevant_ti=ANY,
+                reason="success"
+            )
+        ]
+        # Make sure the correct TI is passed on success 
+        call_args = handle_dag_callback.call_args  
+        ti_passed = call_args.kwargs['relevant_ti']  
+        assert ti_passed.task_id == "test_state_succeeded2"
+
         assert dag_run.state == DagRunState.SUCCESS
         # Callbacks are not added until handle_callback = False is passed to dag_run.update_state()
         assert callback is None
@@ -462,7 +474,19 @@ class TestDagRun:
         dag_run = self.create_dag_run(dag=dag, task_states=initial_task_states, session=session)
         with mock.patch.object(dag_run, "handle_dag_callback") as handle_dag_callback:
             _, callback = dag_run.update_state()
-        assert handle_dag_callback.mock_calls == [mock.call(dag=dag, success=False, reason="task_failure")]
+        assert handle_dag_callback.mock_calls == [
+            mock.call(
+                dag=dag,
+                success=False,
+                relevant_ti=ANY,
+                reason="task_failure"
+            )
+        ]
+        # Make sure the correct TI is passed on failure 
+        call_args = handle_dag_callback.call_args  
+        ti_passed = call_args.kwargs['relevant_ti']  
+        assert ti_passed.task_id == "test_state_failed2"
+
         assert dag_run.state == DagRunState.FAILED
         # Callbacks are not added until handle_callback = False is passed to dag_run.update_state()
         assert callback is None
@@ -1313,8 +1337,18 @@ class TestDagRun:
         with mock.patch.object(dag_run, "handle_dag_callback") as handle_dag_callback:
             _, callback = dag_run.update_state()
         assert handle_dag_callback.mock_calls == [
-            mock.call(dag=scheduler_dag, success=True, reason="success")
+            mock.call(
+                dag=scheduler_dag,
+                success=True,
+                relevant_ti=ANY,
+                reason="success"
+            )
         ]
+        # Make sure the correct TI is passed on success 
+        call_args = handle_dag_callback.call_args  
+        ti_passed = call_args.kwargs['relevant_ti']  
+        assert ti_passed.task_id == "task_2"
+
         assert dag_run.state == DagRunState.SUCCESS
         # Callbacks are not added until handle_callback = False is passed to dag_run.update_state()
         assert callback is None
@@ -3201,7 +3235,12 @@ class TestDagRunHandleDagCallback:
         dag.on_success_callback = on_success
         dag.has_on_success_callback = True
 
-        dr.handle_dag_callback(dag, success=True, reason="test_success")
+        dr.handle_dag_callback(
+            dag,
+            success=True,
+            relevant_ti=dr.get_task_instance("test_task"),
+            reason="test_success"
+        )
 
         assert called is True
         assert context_received is not None
@@ -3231,7 +3270,12 @@ class TestDagRunHandleDagCallback:
         dag.on_failure_callback = on_failure
         dag.has_on_failure_callback = True
 
-        dr.handle_dag_callback(dag, success=False, reason="test_failure")
+        dr.handle_dag_callback(
+            dag,
+            success=False,
+            relevant_ti=dr.get_task_instance("test_task"),
+            reason="test_failure"
+        )
 
         assert called is True
         assert context_received is not None
@@ -3263,7 +3307,12 @@ class TestDagRunHandleDagCallback:
         dag.on_failure_callback = [on_failure_1, on_failure_2]
         dag.has_on_failure_callback = True
 
-        dr.handle_dag_callback(dag, success=False, reason="test_failure")
+        dr.handle_dag_callback(
+            dag,
+            success=False,
+            relevant_ti=dr.get_task_instance("test_task"),
+            reason="test_failure",
+        )
 
         assert call_count == 2
 
@@ -3283,7 +3332,12 @@ class TestDagRunHandleDagCallback:
         dag.on_failure_callback = on_failure
         dag.has_on_failure_callback = True
 
-        dr.handle_dag_callback(dag, success=False, reason="test_failure")
+        dr.handle_dag_callback(
+            dag,
+            success=False,
+            relevant_ti=dr.get_task_instance("test_task"),
+            reason="test_failure",
+        )
 
         assert context_received is not None
         # Check that context contains correct task info
