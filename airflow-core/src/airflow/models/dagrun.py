@@ -1214,7 +1214,14 @@ class DagRun(Base, LoggingMixin):
             self.notify_dagrun_state_changed(msg="task_failure")
 
             if dag.has_on_failure_callback:
-                ti_causing_failure = self.get_first_ti_causing_failure(dag=dag, session=session)
+                ti_causing_failure = (  
+                    max(  
+                        (ti for ti in tis_for_dagrun_state   
+                        if ti.state == TaskInstanceState.FAILED and ti.end_date is not None),  
+                        key=lambda ti: ti.end_date,  
+                        default=None  
+                    )  
+                )
                 if execute_callbacks:
                     self.handle_dag_callback(
                         dag=cast("SDKDAG", dag),
@@ -1430,45 +1437,6 @@ class DagRun(Base, LoggingMixin):
         # deliberately not notifying on QUEUED
         # we can't get all the state changes on SchedulerJob,
         # or LocalTaskJob, so we don't want to "falsely advertise" we notify about that
-
-    @provide_session
-    def get_first_ti_causing_failure(self, dag: SerializedDAG, session: Session = NEW_SESSION) -> TI | None:  
-        """  
-        Get the first task instance that would cause a leaf task to fail the run.
-        """
-
-        tis = self.get_task_instances(session=session)
-
-        failed_leaf_tis = [
-            ti for ti in self._tis_for_dagrun_state(dag=dag, tis=tis)
-            if ti.state in State.failed_states
-        ]
-
-        if not failed_leaf_tis:
-            return None  
-
-        if dag.partial:
-            tis = [
-                ti for ti in tis if not ti.state in (
-                    State.NONE, TaskInstanceState.REMOVED
-                )
-            ]
-
-        # Collect all task IDs on failure paths
-        failure_path_task_ids = set()
-        for failed_leaf in failed_leaf_tis:
-            leaf_task = dag.get_task(failed_leaf.task_id)
-            upstream_ids = leaf_task.get_flat_relative_ids(upstream=True)
-            failure_path_task_ids.update(upstream_ids)
-            failure_path_task_ids.add(failed_leaf.task_id)
-
-        # Find failed tasks on possible failure paths
-        failed_on_paths = [
-            ti for ti in tis
-            if ti.task_id in failure_path_task_ids and ti.state == State.FAILED
-        ]
-
-        return min(failed_on_paths, key=lambda ti: ti.start_date or datetime.max, default=None)
 
 
     def handle_dag_callback(self, dag: SDKDAG, success: bool = True, relevant_ti: TI | None = None, reason: str = "success"):
