@@ -1261,14 +1261,18 @@ class DagRun(Base, LoggingMixin):
             self.notify_dagrun_state_changed(msg="success")
 
             if dag.has_on_success_callback:
-                last_ti_to_run: TI | None = (
-                    max(tis_for_dagrun_state, key=lambda ti: ti.end_date, default=None)
+                last_succeeded_ti: TI | None = (
+                    max(
+                        (ti for ti in tis_for_dagrun_state if ti.state == TaskInstanceState.SUCCESS),
+                        key=lambda ti: ti.end_date,
+                        default=None
+                    )
                 )
                 if execute_callbacks:
                     self.handle_dag_callback(
                         dag=cast("SDKDAG", dag),
                         success=True,
-                        relevant_ti=last_ti_to_run,
+                        relevant_ti=last_succeeded_ti,
                         reason="success"
                     )
                 else:
@@ -1280,7 +1284,7 @@ class DagRun(Base, LoggingMixin):
                         bundle_version=self.bundle_version,
                         context_from_server=DagRunContext(
                             dag_run=self,
-                            last_ti=last_ti_to_run,
+                            last_ti=last_succeeded_ti,
                         ),
                         is_failure_callback=False,
                         msg="success",
