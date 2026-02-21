@@ -1,4 +1,3 @@
-#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,18 +14,21 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""This module provides helper code to make type annotation within Airflow codebase easier."""
 
 from __future__ import annotations
 
-__all__ = ["Literal", "ParamSpec", "Self", "TypeAlias", "TypeGuard", "Unpack", "assert_never"]
+from datetime import datetime
+from uuid import UUID
 
-import sys
+from airflow.api_fastapi.core_api.base import BaseModel
 
-# Keeping this for backwards-compat with old providers
-from typing import Literal, ParamSpec, TypeAlias, TypeGuard
 
-if sys.version_info >= (3, 11):
-    from typing import Self, Unpack, assert_never
-else:
-    from typing_extensions import Self, Unpack, assert_never
+class DeadlineResponse(BaseModel):
+    """Deadline data for the DAG run deadlines tab."""
+
+    id: UUID
+    deadline_time: datetime
+    missed: bool
+    created_at: datetime
+    alert_name: str | None = None
+    alert_description: str | None = None
